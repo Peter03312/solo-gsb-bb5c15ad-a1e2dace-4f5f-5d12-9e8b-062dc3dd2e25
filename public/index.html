@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>过敏原残留追踪</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">🥧</span>
+      <div>
+        <h1>过敏原残留追踪</h1>
+        <p class="subtitle">共用设备 · 批次残留继承 · 清洗移除 · 来源链溯源</p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <span id="meta" class="meta"></span>
+      <button id="btn-recompute" class="btn" type="button" title="从服务器重新拉取并推演">↻ 重新推演</button>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="results" type="button">📊 推演结果</button>
+    <button class="tab" data-tab="batches" type="button">📦 批次录入</button>
+    <button class="tab" data-tab="cleanings" type="button">🧽 清洗记录</button>
+    <button class="tab" data-tab="equipment" type="button">⚙️ 设备管理</button>
+  </nav>
+
+  <main>
+    <!-- 推演结果 -->
+    <section id="tab-results" class="tab-panel active">
+      <div id="results-empty" class="empty hidden">
+        暂无任何记录。可先到「设备管理」创建设备并录入批次，
+        或 <button id="btn-seed-empty" class="btn-link" type="button">载入演示数据</button> 快速体验。
+      </div>
+
+      <div id="results-body">
+        <h2 class="section-title">🕓 残留传播时间线（按时间逐步推演）</h2>
+        <p class="hint">同一分钟内若既有清洗又有批次接触，<b>清洗先执行</b>。点击每条事件可展开事件后的设备残留与继承明细。</p>
+        <div id="timeline" class="timeline"></div>
+
+        <h2 class="section-title">📦 各批最终过敏原</h2>
+        <div id="batch-results" class="card-grid"></div>
+
+        <h2 class="section-title">🏷️ 包装标签核对（按最新推演结果逐批核对）</h2>
+        <p class="hint">以当前最新推演得到的各批<b>最终过敏原</b>为准，与批次录入时保存的<b>标签声明</b>逐批对比，分别标出
+          <b>漏报</b>（最终含有但标签未声明）、<b>多报</b>（标签已声明但最终不含）与<b>一致</b>项；
+          漏报若来自交叉污染，可查看首次继承的设备、时间并逐级展开来源链。
+          上游批次或清洗记录变动后，核对结果随推演自动更新，无需重新保存标签。</p>
+        <div id="label-check"></div>
+
+        <h2 class="section-title">🗓️ 批次改期影响预览（只读试算，不会改动任何记录）</h2>
+        <div class="form-card plan-card">
+          <p class="hint">
+            选择一个<b>现有批次</b>并输入<b>新的批次时间</b>：该批次中<b>填写了时间的设备步骤</b>会按
+            「新批次时间 − 原批次时间」的<b>分钟差整体平移</b>；<b>留空步骤</b>继续沿用新批次时间；
+            <b>其他批次与全部清洗记录保持原样</b>。系统在内存中复用现有推演，比较改期前后所有批次的结果，
+            逐批列出<b>新增 / 消失的交叉污染过敏原</b>与<b>改期后的最终过敏原集合</b>（同一分钟仍按清洗先于接触处理）。
+            预览不会写入或修改任何原始记录。
+          </p>
+          <form id="reschedule-form">
+            <div class="form-row">
+              <label>选择批次
+                <select id="reschedule-batch" required></select>
+              </label>
+              <label>新的批次时间
+                <input type="datetime-local" id="reschedule-time" required step="60" />
+              </label>
+            </div>
+            <p id="reschedule-summary" class="hint"></p>
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary" id="reschedule-run">生成改期预览</button>
+              <button type="button" class="btn" id="reschedule-reset">清空重选</button>
+            </div>
+          </form>
+          <div id="reschedule-result" class="plan-result hidden"></div>
+        </div>
+
+        <h2 class="section-title">🧹 清洗规划（只读试算，不会改动任何记录）</h2>
+        <div class="form-card plan-card">
+          <p class="hint">
+            选择<b>一种过敏原</b>与<b>一个或多个目标批次</b>，录入<b>最多 10 个候选清洗位置</b>（设备 + 时间，可附备注）。
+            系统会在候选位置的子集中搜索，复用上方推演规则（先继承后留渍、清洗只移除所选过敏原、同一分钟清洗先于接触），
+            返回使所有目标批次最终不含该过敏原且<b>清洗次数最少</b>的方案；并列时按候选输入序号的字典序选择。
+            配方自带的过敏原无法被清洗消除；本来就干净时返回空方案；候选位置都无法满足时明确提示无解。
+          </p>
+          <form id="plan-form">
+            <div class="field">
+              <span class="field-label">① 选择需要清除的过敏原（单选）</span>
+              <div id="plan-allergen" class="chips-picker"></div>
+            </div>
+            <div class="field">
+              <span class="field-label">② 选择目标批次（可多选，要求最终均不含该过敏原）</span>
+              <div id="plan-targets" class="chips-picker"></div>
+            </div>
+            <div class="field">
+              <div class="field-label-row">
+                <span class="field-label">③ 候选清洗位置（最多 10 个，序号即并列时的字典序优先级）</span>
+                <button type="button" class="btn btn-small" id="plan-candidate-add">＋ 添加候选位置</button>
+              </div>
+              <div id="plan-candidates" class="steps"></div>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary" id="plan-run">生成清洗规划</button>
+              <button type="button" class="btn" id="plan-reset">清空重填</button>
+            </div>
+          </form>
+          <div id="plan-result" class="plan-result hidden"></div>
+        </div>
+
+        <h2 class="section-title">🧰 设备最终残留</h2>
+        <div id="equipment-results" class="card-grid"></div>
+      </div>
+    </section>
+
+    <!-- 批次 -->
+    <section id="tab-batches" class="tab-panel">
+      <div class="form-card">
+        <h2 id="batch-form-title">新增批次</h2>
+        <form id="batch-form">
+          <input type="hidden" id="batch-id" />
+          <div class="form-row">
+            <label>批次名称
+              <input type="text" id="batch-name" maxlength="100" placeholder="如：A批-全麦面团" required />
+            </label>
+            <label>批次时间
+              <input type="datetime-local" id="batch-time" required step="60" />
+            </label>
+          </div>
+
+          <div class="field">
+            <span class="field-label">配方过敏原（本批自带）</span>
+            <div id="batch-allergens" class="chips-picker"></div>
+            <div class="custom-row">
+              <input type="text" id="batch-custom" maxlength="50" placeholder="自定义过敏原名称（可选）" />
+              <button type="button" class="btn btn-small" id="batch-custom-add">＋ 添加</button>
+            </div>
+          </div>
+
+          <div class="field">
+            <span class="field-label">包装标签声明的过敏原（用于「推演结果」页的标签核对）</span>
+            <div class="label-status">
+              <label class="radio-label"><input type="radio" name="label-status" value="unfilled" checked /> 尚未填写</label>
+              <label class="radio-label"><input type="radio" name="label-status" value="filled" /> 已填写标签声明</label>
+            </div>
+            <div id="label-editor" class="hidden">
+              <div id="label-allergens" class="chips-picker"></div>
+              <div class="custom-row">
+                <input type="text" id="label-custom" maxlength="50" placeholder="自定义过敏原名称（可选）" />
+                <button type="button" class="btn btn-small" id="label-custom-add">＋ 添加</button>
+              </div>
+              <p class="hint">已填写但一种都不勾选 = 声明标签上不含任何过敏原（空集合），与「尚未填写」含义不同。</p>
+            </div>
+          </div>
+
+          <div class="field">
+            <div class="field-label-row">
+              <span class="field-label">依次使用的设备（顺序即使用顺序）</span>
+              <button type="button" class="btn btn-small" id="step-add">＋ 添加步骤</button>
+            </div>
+            <p class="hint">步骤时间留空时，默认使用批次时间。</p>
+            <div id="steps" class="steps"></div>
+          </div>
+
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary" id="batch-save">保存批次</button>
+            <button type="button" class="btn" id="batch-cancel">取消编辑</button>
+          </div>
+        </form>
+      </div>
+
+      <h2 class="section-title">已录入批次</h2>
+      <div id="batch-list" class="record-list"></div>
+    </section>
+
+    <!-- 清洗 -->
+    <section id="tab-cleanings" class="tab-panel">
+      <div class="form-card">
+        <h2 id="cleaning-form-title">新增清洗记录</h2>
+        <form id="cleaning-form">
+          <input type="hidden" id="cleaning-id" />
+          <div class="form-row">
+            <label>清洗设备
+              <select id="cleaning-equipment" required></select>
+            </label>
+            <label>清洗时间
+              <input type="datetime-local" id="cleaning-time" required step="60" />
+            </label>
+          </div>
+          <div class="field">
+            <span class="field-label">本次清洗移除的过敏原（仅移除所勾选项，其余残留保留）</span>
+            <div id="cleaning-allergens" class="chips-picker"></div>
+            <div class="custom-row">
+              <input type="text" id="cleaning-custom" maxlength="50" placeholder="自定义过敏原名称（可选）" />
+              <button type="button" class="btn btn-small" id="cleaning-custom-add">＋ 添加</button>
+            </div>
+          </div>
+          <label class="field">备注
+            <input type="text" id="cleaning-note" maxlength="100" placeholder="如：换产深度清洗" />
+          </label>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary" id="cleaning-save">保存清洗记录</button>
+            <button type="button" class="btn" id="cleaning-cancel">取消编辑</button>
+          </div>
+        </form>
+      </div>
+
+      <h2 class="section-title">已录入清洗记录</h2>
+      <div id="cleaning-list" class="record-list"></div>
+    </section>
+
+    <!-- 设备 -->
+    <section id="tab-equipment" class="tab-panel">
+      <div class="form-card inline-form">
+        <h2>新增设备</h2>
+        <form id="equipment-form" class="form-row">
+          <input type="hidden" id="equipment-id" />
+          <label class="grow">设备名称
+            <input type="text" id="equipment-name" maxlength="100" placeholder="如：1号搅拌缸" required />
+          </label>
+          <button type="submit" class="btn btn-primary" id="equipment-save">保存</button>
+          <button type="button" class="btn hidden" id="equipment-cancel">取消</button>
+        </form>
+        <p class="hint">删除设备会同步删除该设备的清洗记录，以及批次中使用该设备的步骤（步骤被清空的批次也会删除）。</p>
+        <button type="button" class="btn btn-small" id="btn-seed-demo">载入演示数据（仅空库可用）</button>
+      </div>
+
+      <h2 class="section-title">设备列表</h2>
+      <div id="equipment-list" class="record-list"></div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

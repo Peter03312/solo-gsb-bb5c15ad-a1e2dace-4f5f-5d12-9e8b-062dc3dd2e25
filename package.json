@@ -1,0 +1,15 @@
+{
+  "name": "allergen-residue-tracker",
+  "version": "1.0.0",
+  "description": "共用设备食品加工车间的过敏原残留追踪与传播溯源应用",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

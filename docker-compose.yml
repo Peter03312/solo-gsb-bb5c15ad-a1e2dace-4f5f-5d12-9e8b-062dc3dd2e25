@@ -1,0 +1,16 @@
+services:
+  app:
+    build: .
+    image: allergen-tracker:latest
+    container_name: allergen-tracker
+    ports:
+      - "3000:3000"
+    volumes:
+      - allergen-data:/app/data
+    restart: unless-stopped
+    # 首次启动即写入一套演示数据（库非空时不生效）；如想从空库开始，删除下一行：
+    environment:
+      SEED_DEMO: "1"
+
+volumes:
+  allergen-data:
