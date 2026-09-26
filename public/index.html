@@ -110,6 +110,32 @@
           <div id="plan-result" class="plan-result hidden"></div>
         </div>
 
+        <h2 class="section-title">🧭 配方源头传播范围查询（只读查询，不会改动任何记录）</h2>
+        <div class="form-card plan-card">
+          <p class="hint">
+            选择一个<b>源头批次</b>及其<b>配方中的一种过敏原</b>，系统基于当前推演的来源关系，
+            找出<b>最终携带该过敏原</b>且来源链可追溯到该批次配方的<b>其他批次</b>：
+            传播经过多台设备或多条路径汇合时同一批次只列一次，并展示<b>首次继承的设备、时间</b>
+            以及一条可逐级展开至所选源头的传播链；该过敏原被清洗移除后，下游不会沿已截断的路径命中。
+          </p>
+          <form id="propagation-form">
+            <div class="form-row">
+              <label>源头批次
+                <select id="propagation-batch" required></select>
+              </label>
+            </div>
+            <div class="field">
+              <span class="field-label">配方过敏原（单选，仅列出所选批次配方中的过敏原）</span>
+              <div id="propagation-allergen" class="chips-picker"></div>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary" id="propagation-run">查询传播范围</button>
+              <button type="button" class="btn" id="propagation-reset">清空重选</button>
+            </div>
+          </form>
+          <div id="propagation-result" class="plan-result hidden"></div>
+        </div>
+
         <h2 class="section-title">🧰 设备最终残留</h2>
         <div id="equipment-results" class="card-grid"></div>
       </div>

@@ -810,6 +810,140 @@ function renderPlanResult() {
     <p class="hint">该规划仅为试算结果，原始批次与清洗记录未发生任何写入或修改。</p>`;
 }
 
+/* ================= 配方源头传播范围查询（只读查询） ================= */
+
+const propagationUI = { batchId: '', allergen: null, result: null };
+
+function resetPropagationForm() {
+  propagationUI.batchId = '';
+  propagationUI.allergen = null;
+  propagationUI.result = null;
+  renderPropagationBatchSelect(true);
+  renderPropagationAllergenChips();
+  renderPropagationResult();
+}
+
+/** 渲染源头批次下拉；保留仍有效的已选项，否则默认选中时间最早的批次。 */
+function renderPropagationBatchSelect(selectFirst) {
+  const sel = $('#propagation-batch');
+  if (!state.data.batches.length) {
+    sel.innerHTML = '<option value="">（暂无批次，请先录入）</option>';
+    propagationUI.batchId = '';
+    propagationUI.allergen = null;
+    return;
+  }
+  const batches = [...state.data.batches].sort((a, b) =>
+    a.time === b.time
+      ? a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+      : a.time < b.time ? -1 : 1
+  );
+  const prev = sel.value;
+  sel.innerHTML = batches.map((b) =>
+    `<option value="${esc(b.id)}">${esc(b.name)}（${fmtTime(b.time)}）</option>`
+  ).join('');
+  const keep = !selectFirst && prev && batches.some((b) => b.id === prev) ? prev : batches[0].id;
+  sel.value = keep;
+  // 批次变化时，已选的配方过敏原一并失效
+  if (keep !== propagationUI.batchId) {
+    propagationUI.batchId = keep;
+    propagationUI.allergen = null;
+  }
+}
+
+/** 渲染所选批次配方中的过敏原（单选 chips）。 */
+function renderPropagationAllergenChips() {
+  const wrap = $('#propagation-allergen');
+  const b = state.data.batches.find((x) => x.id === propagationUI.batchId);
+  const recipe = b ? b.allergens || [] : [];
+  if (!recipe.length) {
+    wrap.innerHTML = '<span class="hint">所选批次的配方中没有过敏原，请更换批次。</span>';
+    return;
+  }
+  if (propagationUI.allergen && !recipe.includes(propagationUI.allergen)) {
+    propagationUI.allergen = null;
+  }
+  wrap.innerHTML = recipe.map((a) =>
+    `<span class="chip${propagationUI.allergen === a ? ' checked' : ''}" data-a="${esc(a)}" title="点击选择（单选）">${esc(a)}</span>`
+  ).join('');
+  wrap.querySelectorAll('.chip').forEach((chip) =>
+    chip.addEventListener('click', () => {
+      propagationUI.allergen = propagationUI.allergen === chip.dataset.a ? null : chip.dataset.a;
+      renderPropagationAllergenChips();
+    }));
+}
+
+function renderPropagationParts() {
+  renderPropagationBatchSelect(false);
+  renderPropagationAllergenChips();
+  // 记录增删改后，上次查询结果自动失效
+  propagationUI.result = null;
+  renderPropagationResult();
+}
+
+$('#propagation-batch').addEventListener('change', () => {
+  propagationUI.batchId = $('#propagation-batch').value;
+  propagationUI.allergen = null;
+  renderPropagationAllergenChips();
+});
+$('#propagation-reset').addEventListener('click', resetPropagationForm);
+
+$('#propagation-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  guard(async () => {
+    const batchId = $('#propagation-batch').value;
+    if (!batchId) throw new Error('请先选择一个源头批次');
+    if (!propagationUI.allergen) throw new Error('请选择该批次配方中的一种过敏原');
+    const { propagation } = await api('POST', '/api/propagation', {
+      batchId,
+      allergen: propagationUI.allergen,
+    });
+    propagationUI.result = propagation;
+    renderPropagationResult();
+  });
+});
+
+function renderPropagationResult() {
+  const wrap = $('#propagation-result');
+  const r = propagationUI.result;
+  if (!r) {
+    wrap.className = 'plan-result hidden';
+    wrap.innerHTML = '';
+    return;
+  }
+
+  const bannerCls = r.impactedCount ? 'plan-banner plan-ok' : 'plan-banner plan-empty';
+  const icon = r.impactedCount ? '🧭' : '🟰';
+  const title = r.impactedCount
+    ? `传播到 ${r.impactedCount} 个其他批次`
+    : '未传播到其他批次';
+
+  const rows = r.batches.map((b) => {
+    const first = b.first
+      ? `${fmtTime(b.first.time)} · ${esc(b.first.equipmentName)}（第 ${b.first.stepIndex + 1} 步）`
+      : '<span class="tag tag-muted">—</span>';
+    const chain = b.nodeIds.length
+      ? `<details class="source-details"><summary><span class="kv-label">展开传播链（可追溯至所选源头）</span></summary>${treeHtml(b.nodeIds)}</details>`
+      : '';
+    return `<tr>
+      <td class="plan-batch-name">${esc(b.name)}<div class="plan-batch-time">${fmtTime(b.time)}</div></td>
+      <td>${first}</td>
+      <td>${chain}</td>
+    </tr>`;
+  }).join('');
+
+  wrap.className = 'plan-result';
+  wrap.innerHTML = `
+    <div class="${bannerCls}"><b>${icon} ${title}</b><div>${esc(r.message)}</div></div>
+    ${r.batches.length ? `<div class="plan-block">
+      <div class="plan-block-title">最终携带「${esc(r.source.allergen)}」且来源链可追溯到「${esc(r.source.name)}」配方的其他批次</div>
+      <table class="plan-table">
+        <thead><tr><th>批次</th><th>首次继承（时间 · 设备 · 步骤）</th><th>传播链（点击逐级展开）</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>` : ''}
+    <p class="hint">本次查询为只读操作，原始批次与清洗记录未发生任何写入或修改。</p>`;
+}
+
 /* ================= 设备管理 ================= */
 
 function editEquipment(id) {
@@ -1148,6 +1282,8 @@ function renderAll() {
   renderPlannerParts();
   // 批次改期预览区同步刷新；记录变更后上次预览结果自动失效
   renderRescheduleParts();
+  // 传播范围查询区同步刷新；记录变更后上次查询结果自动失效
+  renderPropagationParts();
 }
 
 /* ================= 演示数据 / 重推演 ================= */

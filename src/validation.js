@@ -227,6 +227,26 @@ function normalizeRescheduleInput(body, data) {
   return { batchId, newTime };
 }
 
+/** 校验并规范化配方源头传播范围查询入参（只读查询，不落库）。 */
+function normalizePropagationInput(body, data) {
+  if (!body || typeof body !== 'object') {
+    throw new HttpError(400, '请求体必须是 JSON 对象');
+  }
+  const batchId = cleanText(body.batchId, '批次 ID', 100);
+  const batch = data.batches.find((b) => b.id === batchId);
+  if (!batch) {
+    throw new HttpError(400, '源批次不存在，请重新选择一个现有批次');
+  }
+  const allergen = cleanText(body.allergen, '过敏原', 50);
+  if (!(batch.allergens || []).includes(allergen)) {
+    throw new HttpError(
+      400,
+      `批次「${batch.name}」的配方不含过敏原「${allergen}」，请选择其配方中的过敏原`
+    );
+  }
+  return { batchId, allergen };
+}
+
 module.exports = {
   HttpError,
   parseLocalTime,
@@ -236,5 +256,6 @@ module.exports = {
   normalizeCleaningInput,
   normalizeCleaningPlanInput,
   normalizeRescheduleInput,
+  normalizePropagationInput,
   knownAllergens,
 };
