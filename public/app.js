@@ -810,6 +810,168 @@ function renderPlanResult() {
     <p class="hint">该规划仅为试算结果，原始批次与清洗记录未发生任何写入或修改。</p>`;
 }
 
+/* ================= 配方源头传播范围查询（只读） ================= */
+
+const propUI = { batchId: '', allergen: '', result: null };
+
+function resetPropForm() {
+  propUI.batchId = '';
+  propUI.allergen = '';
+  propUI.result = null;
+  renderPropSelects();
+  renderPropResult();
+}
+
+/** 渲染源头批次下拉；保留仍有效的选择，否则落到时间最早的批次。 */
+function renderPropSelects() {
+  const batchSel = $('#prop-batch');
+  const allergenSel = $('#prop-allergen');
+  if (!state.data.batches.length) {
+    propUI.batchId = '';
+    propUI.allergen = '';
+    batchSel.innerHTML = '<option value="">（暂无批次，请先录入）</option>';
+    allergenSel.innerHTML = '<option value="">（暂无配方过敏原）</option>';
+    $('#prop-summary').textContent = '';
+    return;
+  }
+  const batches = [...state.data.batches].sort((a, b) =>
+    a.time === b.time
+      ? a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+      : a.time < b.time ? -1 : 1
+  );
+  batchSel.innerHTML = batches.map((b) =>
+    `<option value="${esc(b.id)}">${esc(b.name)}（${fmtTime(b.time)}）</option>`
+  ).join('');
+  if (!batches.some((b) => b.id === propUI.batchId)) {
+    propUI.batchId = batches[0].id;
+    propUI.allergen = '';
+  }
+  batchSel.value = propUI.batchId;
+  renderPropAllergenOptions();
+}
+
+/** 按当前所选源头批次渲染其配方过敏原下拉（只能选该批配方自带的）。 */
+function renderPropAllergenOptions() {
+  const sel = $('#prop-allergen');
+  const b = state.data.batches.find((x) => x.id === propUI.batchId);
+  const allergens = (b && b.allergens) || [];
+  if (!allergens.length) {
+    propUI.allergen = '';
+    sel.innerHTML = '<option value="">（该批次无配方过敏原）</option>';
+    $('#prop-summary').textContent = `批次「${b ? b.name : ''}」的配方不含任何过敏原，无法作为传播源头。`;
+    return;
+  }
+  sel.innerHTML = allergens.map((a) => `<option value="${esc(a)}">${esc(a)}</option>`).join('');
+  if (!allergens.includes(propUI.allergen)) propUI.allergen = allergens[0];
+  sel.value = propUI.allergen;
+  syncPropSummary();
+}
+
+function syncPropSummary() {
+  const b = state.data.batches.find((x) => x.id === propUI.batchId);
+  $('#prop-summary').textContent = b && propUI.allergen
+    ? `将查询：批次「${b.name}」配方中的「${propUI.allergen}」最终传播到了哪些其他批次。`
+    : '';
+}
+
+function renderPropParts() {
+  renderPropSelects();
+  // 记录增删改后，上次查询结果自动失效
+  propUI.result = null;
+  renderPropResult();
+}
+
+$('#prop-batch').addEventListener('change', () => {
+  propUI.batchId = $('#prop-batch').value;
+  propUI.allergen = '';
+  renderPropAllergenOptions();
+});
+$('#prop-allergen').addEventListener('change', () => {
+  propUI.allergen = $('#prop-allergen').value;
+  syncPropSummary();
+});
+$('#prop-reset').addEventListener('click', resetPropForm);
+
+$('#prop-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  guard(async () => {
+    const batchId = $('#prop-batch').value;
+    const allergen = $('#prop-allergen').value;
+    if (!batchId) throw new Error('请先选择一个源头批次');
+    if (!allergen) throw new Error('请先选择该批次配方中的一种过敏原');
+    const { propagation } = await api(
+      'GET',
+      `/api/propagation?batchId=${encodeURIComponent(batchId)}&allergen=${encodeURIComponent(allergen)}`
+    );
+    propUI.result = propagation;
+    renderPropResult();
+  });
+});
+
+/**
+ * 把 chain（节点 id 列表，末位为所选源头节点）渲染为逐级可展开的嵌套链：
+ * 每个继承节点是一个 <details>，展开后看到下一级，直至配方源头。
+ * 节点详情取自 state.trace.nodes（与 /api/state 同源）。
+ */
+function propChainHtml(chain) {
+  const nodes = (state.trace && state.trace.nodes) || {};
+  const build = (idx) => {
+    const node = nodes[chain[idx]];
+    if (!node) return '<span class="node-text">（来源缺失）</span>';
+    if (node.kind === 'origin') {
+      return `<span class="node-text">🌾 配方源头：批次「${esc(node.batchName)}」的配方含 <span class="tag tag-recipe">${esc(node.allergen)}</span></span>`;
+    }
+    const summary = `<summary><span class="node-text">↘ 批次「${esc(node.acquiredBy.batchName)}」第 ${node.acquiredBy.stepIndex + 1} 步在「${esc(node.equipmentName)}」上继承了 <span class="tag tag-inherit">${esc(node.allergen)}</span></span></summary>`;
+    const inner = idx + 1 < chain.length
+      ? `<div class="kv"><span class="kv-label">该设备上的 ${esc(node.allergen)} 可追溯到：</span><ul class="source-tree"><li class="source-node">${build(idx + 1)}</li></ul></div>`
+      : '';
+    return `<details class="source-details">${summary}${inner}</details>`;
+  };
+  return chain && chain.length
+    ? `<ul class="source-tree root"><li class="source-node">${build(0)}</li></ul>`
+    : '<span class="tag tag-muted">无</span>';
+}
+
+function renderPropResult() {
+  const wrap = $('#prop-result');
+  const p = propUI.result;
+  if (!p) {
+    wrap.className = 'plan-result hidden';
+    wrap.innerHTML = '';
+    return;
+  }
+
+  const bannerCls = p.affectedCount ? 'plan-banner plan-ok' : 'plan-banner plan-empty';
+  const icon = p.affectedCount ? '🔍' : '🟰';
+  const title = p.affectedCount
+    ? `传播到 ${p.affectedCount} 个其他批次`
+    : '未传播到其他批次';
+
+  const table = p.affectedCount
+    ? `<div class="plan-block">
+        <div class="plan-block-title">被「${esc(p.source.name)}」配方「${esc(p.source.allergen)}」传播的批次（同一批次仅列一次，按批次时间排序）</div>
+        <table class="plan-table">
+          <thead><tr><th>被传播批次</th><th>首次继承（时间 · 设备 · 步骤）</th><th>传播链（逐级展开至所选源头）</th></tr></thead>
+          <tbody>${p.affected.map((a) => `
+            <tr>
+              <td class="plan-batch-name">${esc(a.name)}<div class="plan-batch-time">${fmtTime(a.time)}</div></td>
+              <td>${a.first
+                ? `${fmtTime(a.first.time)} · ${esc(a.first.equipmentName)}（第 ${a.first.stepIndex + 1} 步）`
+                : '—'}</td>
+              <td>${propChainHtml(a.chain)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`
+    : '';
+
+  wrap.className = 'plan-result';
+  wrap.innerHTML = `
+    <div class="${bannerCls}"><b>${icon} ${title}</b><div>${esc(p.message)}</div></div>
+    ${table}
+    <p class="hint">本次查询为只读：基于当前推演的来源关系（trace.nodes）实时推导，未写入或修改任何原始记录。</p>`;
+}
+
 /* ================= 设备管理 ================= */
 
 function editEquipment(id) {
@@ -1148,6 +1310,8 @@ function renderAll() {
   renderPlannerParts();
   // 批次改期预览区同步刷新；记录变更后上次预览结果自动失效
   renderRescheduleParts();
+  // 配方源头传播范围查询区同步刷新；记录变更后上次查询结果自动失效
+  renderPropParts();
 }
 
 /* ================= 演示数据 / 重推演 ================= */

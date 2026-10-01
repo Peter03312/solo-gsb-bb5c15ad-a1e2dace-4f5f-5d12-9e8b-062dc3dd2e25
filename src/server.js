@@ -7,6 +7,7 @@ const { JsonStore, newId } = require('./store');
 const { trace } = require('./trace');
 const { planCleaning } = require('./planner');
 const { previewReschedule } = require('./reschedule');
+const { queryPropagation } = require('./propagation');
 const { checkLabels } = require('./labelcheck');
 const { buildDemoData } = require('./demo');
 const {
@@ -16,6 +17,7 @@ const {
   normalizeCleaningInput,
   normalizeCleaningPlanInput,
   normalizeRescheduleInput,
+  normalizePropagationInput,
   knownAllergens,
 } = require('./validation');
 
@@ -211,6 +213,18 @@ app.post('/api/reschedule-preview', (req, res, next) => {
     const data = store.read();
     const input = normalizeRescheduleInput(req.body || {}, data);
     res.json({ preview: previewReschedule(data, input) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ---- 配方源头传播范围查询（只读，绝不写入或修改原始记录） -----------------
+
+app.get('/api/propagation', (req, res, next) => {
+  try {
+    const data = store.read();
+    const input = normalizePropagationInput(req.query, data);
+    res.json({ propagation: queryPropagation(trace(data), input) });
   } catch (err) {
     next(err);
   }
